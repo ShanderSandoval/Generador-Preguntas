@@ -1,0 +1,16 @@
+# 1. Entornos Virtuales (No se suben porque cada PC debe crear el suyo)
+.venv/
+venv/
+env/
+
+# 2. Archivos de caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 3. Archivos temporales de compilación de PyInstaller (PERO NO dist/)
+build/
+*.spec
+
+
