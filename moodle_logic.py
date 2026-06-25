@@ -63,40 +63,30 @@ class MoodleXMLGenerator:
 class SmartQuizParser:
     def __init__(self):
         self.questions = []
-        self.generator = MoodleXMLGenerator()
+        self.generator = None
 
     def preprocess_text(self, text):
         text = re.sub(r'([a-zñáéíóú])([A-E]\))', r'\1\n\2', text)
         text = re.sub(r'([a-zñáéíóú]\.)\s*([a-e][\)\.])\s', r'\1\n\2 ', text)
         return text
 
-    def parse_document(self, raw_text, log_callback=None):
+    def parse_document(self, raw_text, file_path="", log_callback=None):
         raw_text = self.preprocess_text(raw_text)
         lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
         
         current_q = None
-        preguntas_en_este_doc = 0
         
         for line in lines:
-            # 1. Detectar inicio de pregunta
             q_match = re.match(r'^\d+[\.\-\)]\s*(.*)', line)
             if q_match:
                 if current_q:
                     self.questions.append(current_q)
-                    preguntas_en_este_doc += 1
-                    if log_callback:
-                        log_callback(f"  ✓ Detectada: {current_q['text'][:50]}...")
                 
-                current_q = {
-                    'text': q_match.group(1),
-                    'options': [],
-                    'correct_letter': None
-                }
+                current_q = {'text': q_match.group(1), 'options': [], 'correct_letter': None, 'file_path': file_path}
                 continue
 
             if not current_q: continue
 
-            # 2. Detectar si la línea marca la respuesta correcta al final (Incluso si está vacía)
             ans_match = re.match(r'^Respuest[a-z\s]*:\s*([a-zA-Z]?)', line, re.IGNORECASE)
             if ans_match:
                 letra_detectada = ans_match.group(1).strip()
@@ -104,28 +94,20 @@ class SmartQuizParser:
                     current_q['correct_letter'] = letra_detectada.lower()
                 continue
 
-            # 3. Detectar opciones
             opt_match = re.match(r'^\[?\s*([xX\*]?)\s*\]?\s*([a-eA-E])[\.\)]\s*(.*)', line)
             if opt_match:
                 is_marked_correct = opt_match.group(1).lower() in ['x', '*']
                 letter = opt_match.group(2).lower()
                 opt_text = opt_match.group(3)
 
-                current_q['options'].append({
-                    'letter': letter,
-                    'text': opt_text,
-                    'is_correct': is_marked_correct
-                })
-                
+                current_q['options'].append({'letter': letter, 'text': opt_text, 'is_correct': is_marked_correct})
                 if is_marked_correct:
                     current_q['correct_letter'] = letter
                 continue
 
-            # 4. Destruir encabezados sueltos
             if re.match(r'^[\W_]*(secci[óo]n|bloque|instrucciones|cuestionario|banco|tema)\b', line, re.IGNORECASE):
                 continue
 
-            # 5. Continuación de texto
             if not current_q['options']:
                 current_q['text'] += "\n" + line
             else:
@@ -133,23 +115,32 @@ class SmartQuizParser:
 
         if current_q:
             self.questions.append(current_q)
-            preguntas_en_este_doc += 1
-            if log_callback:
-                log_callback(f"  ✓ Detectada: {current_q['text'][:50]}...")
 
-        return preguntas_en_este_doc
+        return len(self.questions)
 
-    def generate_all_xml(self, log_callback=None):
+    def validate_questions(self):
         for q in self.questions:
             correct_letter = q.get('correct_letter')
-            for opt in q['options']:
-                if correct_letter and opt['letter'] == correct_letter:
-                    opt['is_correct'] = True
+            if correct_letter:
+                for opt in q['options']:
+                    if opt['letter'] == correct_letter:
+                        opt['is_correct'] = True
+            
+            q['is_valid'] = any(opt.get('is_correct') for opt in q['options'])
 
-            if not any(opt.get('is_correct') for opt in q['options']) and q['options']:
-                q['options'][0]['is_correct'] = True 
+    def generate_valid_xml(self, log_callback=None):
+        self.generator = MoodleXMLGenerator()
+        self.validate_questions()
+        
+        exportadas = 0
+        omitidas = 0
+        
+        for q in self.questions:
+            if not q.get('is_valid', False):
+                omitidas += 1
                 if log_callback:
-                    log_callback(f"  [!] Advertencia: La pregunta '{q['text'][:20]}...' no tenía respuesta. Se asignó la opción A.")
+                    log_callback(f"  [⚠️] EXCLUIDA: La pregunta '{q['text'][:25]}...' no tiene respuesta.")
+                continue
 
             q_type = 'multichoice'
             is_true_correct = False
@@ -162,13 +153,17 @@ class SmartQuizParser:
                         if opt.get('is_correct') and ("verdadero" in opt['text'].lower() or "true" in opt['text'].lower()):
                             is_true_correct = True
             
-            # Limite de 250 caracteres para aprovechar el nombre en Moodle
             name = q['text'][:250].replace('\n', ' ')
 
             if q_type == 'multichoice' and q['options']: 
                 self.generator.add_multiple_choice(name, q['text'], q['options'])
+                exportadas += 1
             elif q_type == 'truefalse':
                 self.generator.add_true_false(name, q['text'], is_true_correct)
+                exportadas += 1
+
+        if log_callback:
+            log_callback(f"\n[i] XML final contendrá {exportadas} preguntas. Se filtraron {omitidas} preguntas inválidas.")
 
         return self.generator.get_final_xml()
 
