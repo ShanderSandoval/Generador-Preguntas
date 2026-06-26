@@ -77,7 +77,7 @@ Si deseas ejecutar el código fuente o contribuir al proyecto:
 1. Clona este repositorio:
 
     ```bash
-    git clone [https://github.com/tu-usuario/gestor-cuestionarios-moodle.git](https://github.com/tu-usuario/gestor-cuestionarios-moodle.git)
+    git clone https://github.com/ShanderSandoval/Generador-Preguntas.git
     ```
 
 2. Crea y activa un entorno virtual:
